@@ -43,37 +43,41 @@ class StripeBackend(object):
         error = None
         if request.method == 'POST':
             form = CardForm(request.POST)
-            try:
-                card_token = request.POST['stripeToken']
-            except KeyError:
-                return HttpResponseBadRequest('stripeToken not set')
-            currency = getattr(settings, 'SHOP_STRIPE_CURRENCY', 'usd')
-            order = self.shop.get_order(request)
-            order_id = self.shop.get_order_unique_id(order)
-            amount = self.shop.get_order_total(order)
-            amount = str(int(amount * 100))
-            if request.user.is_authenticated():
-                description = request.user.email
+            if form.is_valid():
+                try:
+                    card_token = form.cleaned_data['stripeToken']
+                except KeyError:
+                    return HttpResponseBadRequest('stripeToken not set')
+                currency = getattr(settings, 'SHOP_STRIPE_CURRENCY', 'usd')
+                order = self.shop.get_order(request)
+                order_id = self.shop.get_order_unique_id(order)
+                amount = self.shop.get_order_total(order)
+                amount = str(int(amount * 100))
+                if request.user.is_authenticated():
+                    description = request.user.email
+                else:
+                    description = form.cleaned_data['stripeEmail']
+                stripe_dict = {
+                    'amount': amount,
+                    'currency': currency,
+                    'card': card_token,
+                    'description': description,
+                    'receipt_email': form.cleaned_data['stripeEmail']
+                }
+                try:
+                    stripe_result = stripe.Charge.create(**stripe_dict)
+                except stripe.CardError as e:
+                    error = e
+                else:
+                    self.shop.confirm_payment(
+                        self.shop.get_order_for_id(order_id),
+                        amount,
+                        stripe_result['id'],
+                        self.backend_name
+                    )
+                    return redirect(self.shop.get_finished_url())
             else:
-                description = 'guest customer'
-            stripe_dict = {
-                'amount': amount,
-                'currency': currency,
-                'card': card_token,
-                'description': description,
-            }
-            try:
-                stripe_result = stripe.Charge.create(**stripe_dict)
-            except stripe.CardError as e:
-                error = e
-            else:
-                self.shop.confirm_payment(
-                    self.shop.get_order_for_id(order_id),
-                    amount,
-                    stripe_result['id'],
-                    self.backend_name
-                )
-                return redirect(self.shop.get_finished_url())
+                print "ERROR: cart was invalid"
         else:
             form = CardForm()
         return render(request, "shop_stripe/payment.html", {
