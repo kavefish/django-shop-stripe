@@ -5,6 +5,7 @@ from django.conf.urls import patterns, url
 from django.http import HttpResponseRedirect, HttpResponseBadRequest
 from django.shortcuts import render, redirect
 from .forms import CardForm
+from django.contrib import messages
 import stripe
 
 
@@ -79,6 +80,14 @@ class StripeBackend(object):
                 stripe_result = stripe.Charge.create(**stripe_dict)
             except stripe.CardError as e:
                 error = e
+                messages.error(request,error.message)
+                self.shop.cancel_payment(
+                    self.shop.get_order_for_id(order_id),
+                    amount,
+                    self.backend_name
+                )
+                return redirect(self.shop.get_cancel_url())
+
             else:
                 self.shop.confirm_payment(
                     self.shop.get_order_for_id(order_id),
